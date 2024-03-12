@@ -1,0 +1,559 @@
+import tkinter as tk
+from tkinter import ttk
+import sqlite3
+from tkinter import messagebox
+
+class UsabilityAuditApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Usability Audit App")
+
+        # Создание базы данных SQLite и таблицы для чек-листов
+        self.conn = sqlite3.connect("usability_audit.db")
+        self.cursor = self.conn.cursor()
+
+        # Создание таблицы, если она не существует
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS checklists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                product TEXT,
+                version TEXT,
+                date TEXT,
+                comment TEXT  -- Добавляем столбец для комментария
+            )
+        ''')
+
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS criteria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                checklist_id INTEGER,
+                criterion TEXT,
+                evaluation TEXT,
+                source TEXT,
+                comment TEXT,
+                FOREIGN KEY(checklist_id) REFERENCES checklists(id)
+            )
+        ''')
+
+        self.conn.commit()
+
+
+
+        # GUI элементы
+        self.create_button = ttk.Button(root, text="Создать чек-лист", command=self.create_checklist)
+        self.create_button.pack(pady=10)
+
+        self.view_button = ttk.Button(root, text="Просмотреть чек-листы", command=self.view_checklists)
+        self.view_button.pack(pady=10)
+
+        self.exit_button = ttk.Button(root, text="Выйти", command=root.destroy)
+        self.exit_button.pack(pady=10)
+
+        # Загрузка чек-листов при запуске
+        self.load_checklists()
+
+        # Привязка событий прокрутки к главному окну
+        root.bind_all("<MouseWheel>", self.on_mousewheel)
+        root.bind_all("<Button-4>", self.on_mousewheel)
+        root.bind_all("<Button-5>", self.on_mousewheel)
+
+    def load_checklists(self):
+        # Получение всех чек-листов из базы данных
+        self.cursor.execute("SELECT * FROM checklists")
+        checklists = self.cursor.fetchall()
+
+        # Вывод информации о чек-листах в консоль (для тестирования)
+        for checklist in checklists:
+            print(f"Loaded Checklist: {checklist[1]} - {checklist[3]}")
+
+    def create_checklist(self):
+        self.create_window = tk.Toplevel(self.root)
+        self.create_window.title("Создание чек-листа")
+
+        # Создание виджета Canvas для прокрутки
+        canvas = tk.Canvas(self.create_window)
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # Создание фрейма для элементов интерфейса
+        frame = ttk.Frame(canvas)
+        frame.pack(side="left", fill="both", expand=True)
+
+        # Прокрутка к фрейму
+        canvas.create_window((0, 0), window=frame, anchor="nw")
+
+        # Привязка полос прокрутки к Canvas
+        scrollbar = ttk.Scrollbar(self.create_window, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # GUI элементы для заполнения информации о чек-листе
+        name_label = ttk.Label(frame, text="Имя:")
+        name_label.grid(row=0, column=0, padx=10, pady=5)
+        self.name_entry = ttk.Entry(frame)
+        self.name_entry.grid(row=0, column=1, padx=10, pady=5)
+
+        product_label = ttk.Label(frame, text="Продукт:")
+        product_label.grid(row=1, column=0, padx=10, pady=5)
+        self.product_entry = ttk.Entry(frame)
+        self.product_entry.grid(row=1, column=1, padx=10, pady=5)
+
+        version_label = ttk.Label(frame, text="Версия продукта:")
+        version_label.grid(row=2, column=0, padx=10, pady=5)
+        self.version_entry = ttk.Entry(frame)
+        self.version_entry.grid(row=2, column=1, padx=10, pady=5)
+
+        date_label = ttk.Label(frame, text="Дата (ДД-ММ-ГГГГ):")
+        date_label.grid(row=3, column=0, padx=10, pady=5)
+        self.date_entry = ttk.Entry(frame)
+        self.date_entry.grid(row=3, column=1, padx=10, pady=5)
+
+        # Список виджетов Entry для критериев
+        self.criteria_entries = [self.create_criterion_entry(frame, i+1) for i in range(30)]
+
+        # Кнопка для добавления новых полей критериев
+        add_button = ttk.Button(frame, text="+10", command=lambda: self.add_criterion_entry(frame))
+        add_button.grid(row=5, column=0, padx=5, pady=5, sticky='w')
+
+        # Кнопка для удаления последних полей критериев
+        remove_button = ttk.Button(frame, text="-", command=self.remove_criterion_entry)
+        remove_button.grid(row=5, column=1, padx=5, pady=5, sticky='w')
+
+        # Кнопка для перехода к оценке критериев
+        evaluate_button = ttk.Button(frame, text="Оценить", command=self.show_evaluation)
+        evaluate_button.grid(row=5, column=2, padx=5, pady=5, sticky='w')
+
+        # Привязка событий прокрутки к Canvas
+        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+    def create_criterion_entry(self, parent, number):
+        criterion_frame = ttk.Frame(parent)
+        criterion_frame.grid(row=6 + number - 1, column=0, columnspan=4, padx=10, pady=5, sticky='ew')
+
+        criterion_label = ttk.Label(criterion_frame, text=f"Критерий {number}:")
+        criterion_label.grid(row=0, column=0, padx=(0, 5), pady=5, sticky='e')
+        criterion_var = tk.StringVar()
+        criterion_entry = ttk.Entry(criterion_frame, textvariable=criterion_var)
+        criterion_entry.grid(row=0, column=1, padx=(0, 5), pady=5, sticky='ew')
+
+        source_label = ttk.Label(criterion_frame, text="Источник:")
+        source_label.grid(row=0, column=2, padx=(10, 5), pady=5, sticky='e')
+        source_var = tk.StringVar()
+        source_entry = ttk.Entry(criterion_frame, textvariable=source_var)
+        source_entry.grid(row=0, column=3, padx=(0, 5), pady=5, sticky='ew')
+
+        return criterion_frame, criterion_var, source_var
+
+    def add_criterion_entry(self, parent_frame):
+        # Добавление новых полей для критериев
+        for i in range(10):
+            new_number = len(self.criteria_entries) + 1
+            criterion_frame, criterion_entry, source_entry = self.create_criterion_entry(parent_frame, new_number)
+            self.criteria_entries.append((criterion_frame, criterion_entry, source_entry))
+
+    def remove_criterion_entry(self):
+        # Удаление последнего поля для критерия
+        if len(self.criteria_entries) > 1:
+            criterion_frame, _, _ = self.criteria_entries.pop(-1)  # Извлекаем фрейм с виджетами
+            criterion_frame.destroy()  # Уничтожаем фрейм
+
+    def show_evaluation(self):
+        # Получение информации о чек-листе
+        name = self.name_entry.get()
+        product = self.product_entry.get()
+        version = self.version_entry.get()
+        date = self.date_entry.get()
+
+        if not name or not product or not version or not date:
+            messagebox.showwarning("Внимание", "Пожалуйста, заполните все поля.")
+            return
+
+        # Сохранение информации о чек-листе в базе данных
+        self.cursor.execute('''
+            INSERT INTO checklists (name, product, version, date) VALUES (?, ?, ?, ?)
+        ''', (name, product, version, date))
+        self.conn.commit()
+        checklist_id = self.cursor.lastrowid
+
+        # Открытие окна для оценки критериев
+        evaluation_window = tk.Toplevel(self.root)
+        evaluation_window.title("Оценка критериев")
+
+        # Создание виджета Canvas для прокрутки
+        eval_canvas = tk.Canvas(evaluation_window)
+        eval_canvas.pack(side="left", fill="both", expand=True)
+
+        # Создание фрейма для элементов интерфейса
+        eval_frame = ttk.Frame(eval_canvas)
+        eval_frame.pack(side="left", fill="both", expand=True)
+
+        # Прокрутка к фрейму
+        eval_canvas.create_window((0, 0), window=eval_frame, anchor="nw")
+
+        # Привязка полос прокрутки к Canvas
+        eval_scrollbar = ttk.Scrollbar(evaluation_window, orient="vertical", command=eval_canvas.yview)
+        eval_scrollbar.pack(side="right", fill="y")
+        eval_canvas.configure(yscrollcommand=eval_scrollbar.set)
+
+        # GUI элементы для оценки критериев
+        self.evaluation_vars = []
+        for i, (criterion_frame, criterion_entry, source_entry) in enumerate(self.criteria_entries):
+            criterion_value = criterion_entry.get().strip()
+            source_value = source_entry.get().strip()
+            if criterion_value:  # Проверяем, заполнен ли критерий
+                criterion_label = ttk.Label(eval_frame, text=f"Критерий {i + 1}: {criterion_value}")
+                criterion_label.grid(row=i, column=0, padx=10, pady=5, sticky='w')
+                evaluation_var = tk.StringVar()  # По умолчанию устанавливаем "No"
+
+                yes_radio = tk.Radiobutton(eval_frame, text="Yes", variable=evaluation_var, value="Yes")
+                yes_radio.grid(row=i, column=1, padx=10, pady=5)
+
+                no_radio = tk.Radiobutton(eval_frame, text="No", variable=evaluation_var, value="No")
+                no_radio.grid(row=i, column=2, padx=10, pady=5)
+
+                partial_radio = tk.Radiobutton(eval_frame, text="Partial", variable=evaluation_var, value="Partial")
+                partial_radio.grid(row=i, column=3, padx=10, pady=5)
+
+                source_label = ttk.Label(eval_frame, text=f"Источник: {source_value}")
+                source_label.grid(row=i, column=4, padx=10, pady=5)
+
+                comment_label = ttk.Label(eval_frame, text="Комментарий:")
+                comment_label.grid(row=i, column=5, padx=10, pady=5)
+
+                comment_var = tk.StringVar()
+                comment_entry = ttk.Entry(eval_frame, textvariable=comment_var)
+                comment_entry.grid(row=i, column=6, padx=10, pady=5)
+
+                self.evaluation_vars.append((evaluation_var, comment_var))
+
+        if not self.evaluation_vars:  # Если нет заполненных критериев
+            messagebox.showwarning("Внимание", "Необходимо заполнить хотя бы один критерий.")
+            evaluation_window.destroy()
+            return
+
+        # Кнопка для сохранения оценок
+        save_button = ttk.Button(eval_frame, text="Сохранить", command=lambda: self.save_evaluation(checklist_id))
+        save_button.grid(row=len(self.evaluation_vars), column=0, columnspan=4, pady=10)
+
+        # Создание надписи "Комментарий"
+        comment_label = ttk.Label(eval_frame, text="Комментарий:")
+        comment_label.grid(row=1, column=7, padx=(10, 0), pady=5, sticky='e')
+
+        # Создание поля для ввода комментария
+        self.comment_text = tk.Text(eval_frame, width=50, height=10)
+        self.comment_text.grid(row=2, column=7, rowspan=2, columnspan=2, padx=(0, 10), pady=5, sticky='nsew')
+
+        # Привязка событий прокрутки к Canvas
+        eval_frame.bind("<Configure>", lambda e: eval_canvas.configure(scrollregion=eval_canvas.bbox("all")))
+
+    def save_evaluation(self, checklist_id):
+        # Очистка предыдущих данных критериев для данного чек-листа
+        self.cursor.execute("DELETE FROM criteria WHERE checklist_id=?", (checklist_id,))
+
+        # Получение и сохранение новых оценок критериев
+        for entry, (evaluation, comment) in zip(self.criteria_entries, self.evaluation_vars):
+            criterion_value = entry[1].get().strip()
+            evaluation_value = evaluation.get()
+            comment_value = comment.get()
+            source_value = entry[2].get().strip()
+
+            if criterion_value:
+                self.cursor.execute('''
+                    INSERT INTO criteria (checklist_id, criterion, evaluation, source, comment) VALUES (?, ?, ?, ?, ?)
+                ''', (checklist_id, criterion_value, evaluation_value, source_value, comment_value))
+
+        # Получение текста комментария
+        overall_comment_value = self.comment_text.get("1.0", "end-1c")
+
+        # Сохранение комментария для последующего отображения
+        self.comment_text_value = overall_comment_value
+
+        # Обновление комментария в базе данных
+        self.cursor.execute("UPDATE checklists SET comment=? WHERE id=?", (overall_comment_value, checklist_id))
+        self.conn.commit()
+        messagebox.showinfo("Успешно", "Оценки сохранены успешно.")
+        self.create_window.destroy()
+
+        # После сохранения открыть окно просмотра чек-листа
+        self.view_checklist_window(
+            self.cursor.execute("SELECT * FROM checklists WHERE id=?", (checklist_id,)).fetchone())
+
+    def view_checklists(self):
+        view_window = tk.Toplevel(self.root)
+        view_window.title("Просмотр чек-листов")
+
+        # Добавление надписи "Чек-листы" крупным шрифтом
+        checklist_label = ttk.Label(view_window, text="Чек-листы", font=("Arial", 24, "bold"))
+        checklist_label.grid(row=0, column=0, columnspan=3, pady=10, padx=10, sticky="w")
+
+        # Поле ввода для поиска
+        search_label = ttk.Label(view_window, text="Поиск:")
+        search_label.grid(row=1, column=5, padx=10, pady=5, sticky="e")
+        self.search_entry = ttk.Entry(view_window)
+        self.search_entry.grid(row=1, column=5, padx=10, pady=5, sticky="ew")
+
+        # Кнопка для выполнения поиска
+        search_button = ttk.Button(view_window, text="Поиск", command=self.filter_checklists)
+        search_button.grid(row=1, column=6, padx=10, pady=5)
+
+        # Получение всех чек-листов из базы данных
+        self.cursor.execute("SELECT * FROM checklists")
+        checklists = self.cursor.fetchall()
+
+        # GUI элементы для отображения списка чек-листов
+        for i, checklist in enumerate(checklists):
+            # Формирование строки для отображения в списке
+            checklist_info = f"{checklist[1]} - {checklist[2]} - {checklist[3]} - {checklist[4]}"
+            checklist_label = ttk.Label(view_window, text=checklist_info)
+            checklist_label.grid(row=i + 1, column=0, columnspan=2, pady=5, padx=10, sticky="w")
+
+            # Кнопка для просмотра выбранного чек-листа
+            view_button = ttk.Button(view_window, text="Просмотреть",
+                                     command=lambda c=checklist: self.view_checklist_window(c))
+            view_button.grid(row=i + 1, column=2, pady=5, padx=10, sticky="w")
+
+            # Кнопка для удаления выбранного чек-листа
+            delete_button = ttk.Button(view_window, text="Удалить",
+                                       command=lambda c=checklist, w=view_window: self.delete_checklist(c[0], w))
+
+            delete_button.grid(row=i + 1, column=3, pady=5, padx=10, sticky="w")
+
+    def delete_checklist(self, checklist_id, window_to_close):
+        # Удаление чек-листа из базы данных по его ID
+        self.cursor.execute("DELETE FROM checklists WHERE id=?", (checklist_id,))
+        self.conn.commit()
+        messagebox.showinfo("Успешно", "Чек-лист успешно удален.")
+
+        # Закрыть предыдущее окно
+        if window_to_close:
+            window_to_close.destroy()
+
+        # Обновить отображение списка чек-листов
+        self.view_checklists()
+
+    def view_checklist_window(self, checklist):
+
+        def open_create_window():
+            # Получаем данные о критериях для выбранного чек-листа
+            checklist_id = checklist[0]
+            app.cursor.execute("SELECT * FROM criteria WHERE checklist_id=?", (checklist_id,))
+            criteria_data = app.cursor.fetchall()
+
+            # Вызываем метод создания чек-листа, чтобы открыть окно создания
+            app.create_checklist()
+
+            # Заполняем поля критериев данными из выбранного чек-листа
+            for i, criterion in enumerate(criteria_data):
+                if i < len(app.criteria_entries):
+                    # Получаем ссылки на виджеты для текущего критерия
+                    criterion_frame, criterion_entry, source_entry = \
+                        app.criteria_entries[i]
+
+                    # Заполняем поля критериев
+                    criterion_entry.set(criterion[2])
+                    source_entry.set(criterion[4])
+                else:
+                    # Добавляем новые поля критериев, если нужно
+                    app.add_criterion_entry(app.create_window)
+                    criterion_frame, criterion_entry, source_entry = \
+                        app.criteria_entries[-1]
+
+                    # Заполняем поля критериев
+                    criterion_entry.set(criterion[2])
+                    source_entry.set(criterion[4])
+
+            # Очищаем поля с именем, продуктом, версией продукта и датой
+            app.name_entry.delete(0, tk.END)
+            app.product_entry.delete(0, tk.END)
+            app.version_entry.delete(0, tk.END)
+            app.date_entry.delete(0, tk.END)
+
+        def filter_criteria():
+            filter_text = filter_entry.get().strip().lower()
+            filtered_criteria = [criterion for criterion in criteria_data if
+                                 filter_text in criterion[2].lower() or
+                                 (criterion[4] is not None and filter_text in criterion[4].lower()) or
+                                 filter_text == criterion[3].lower()]
+
+            # Создаем новое окно для отображения отфильтрованных критериев
+            filtered_window = tk.Toplevel(view_checklist_window)
+            filtered_window.title("Отфильтрованные критерии")
+
+            # Создаем фрейм для отображения критериев
+            filtered_frame = ttk.Frame(filtered_window)
+            filtered_frame.pack(padx=10, pady=10)
+
+            # Отображаем отфильтрованные критерии
+            for i, criterion in enumerate(filtered_criteria):
+                criterion_label = ttk.Label(filtered_frame, text=f"Критерий {i + 1}: {criterion[2]}")
+                criterion_label.grid(row=i, column=0, padx=10, pady=5, sticky='w')
+
+                evaluation_label = ttk.Label(filtered_frame, text=f"Оценка: {criterion[3]}")
+                evaluation_label.grid(row=i, column=1, padx=10, pady=5, sticky='w')
+
+                source_text = criterion[4] if criterion[4] is not None else ""
+                source_label = ttk.Label(filtered_frame, text=f"Источник: {source_text}")
+                source_label.grid(row=i, column=2, padx=10, pady=5, sticky='w')
+
+                comment_text = criterion[5] if criterion[5] is not None else ""
+                comment_label = ttk.Label(filtered_frame, text=f"Комментарий: {comment_text}")
+                comment_label.grid(row=i, column=3, padx=10, pady=5, sticky='w')
+
+        view_checklist_window = tk.Toplevel(self.root)
+        view_checklist_window.title(f"Просмотр чек-листа: {checklist[1]}")
+
+        # Создание виджета Canvas для прокрутки
+        canvas = tk.Canvas(view_checklist_window)
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # Создание фрейма для элементов интерфейса
+        frame = ttk.Frame(canvas)
+        frame.pack(side="left", fill="both", expand=True)
+
+        # Прокрутка к фрейму
+        canvas.create_window((0, 0), window=frame, anchor="nw")
+
+        # Привязка полос прокрутки к Canvas
+        scrollbar = ttk.Scrollbar(view_checklist_window, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Имя чек-листа
+        name_label = ttk.Label(frame, text="Имя:")
+        name_label.grid(row=0, column=0, padx=10, pady=5, sticky='e')
+        name_value = ttk.Label(frame, text=checklist[1])
+        name_value.grid(row=0, column=1, padx=[0, 40], pady=5, sticky='w')
+
+        # Продукт
+        product_label = ttk.Label(frame, text="Продукт:")
+        product_label.grid(row=1, column=0, padx=10, pady=5, sticky='e')
+        product_value = ttk.Label(frame, text=checklist[2])
+        product_value.grid(row=1, column=1, padx=[0, 40], pady=5, sticky='w')
+
+        # Версия продукта
+        version_label = ttk.Label(frame, text="Версия продукта:")
+        version_label.grid(row=2, column=0, padx=10, pady=5, sticky='e')
+        version_value = ttk.Label(frame, text=checklist[3])
+        version_value.grid(row=2, column=1, padx=[0, 40], pady=5, sticky='w')
+
+        # Дата
+        date_label = ttk.Label(frame, text="Дата:")
+        date_label.grid(row=3, column=0, padx=10, pady=5, sticky='e')
+        date_value = ttk.Label(frame, text=checklist[4])
+        date_value.grid(row=3, column=1, padx=[0, 40], pady=5, sticky='w')
+
+        # Получение информации о количестве оценок "Yes", "No" и "Partial"
+        self.cursor.execute("SELECT evaluation, COUNT(*) FROM criteria WHERE checklist_id=? GROUP BY evaluation",
+                            (checklist[0],))
+        evaluation_counts = self.cursor.fetchall()
+
+        # Создание строки для отображения информации о количестве оценок
+        yes_count = sum(count for evaluation, count in evaluation_counts if evaluation == "Yes")
+        no_count = sum(count for evaluation, count in evaluation_counts if evaluation == "No")
+        partial_count = sum(count for evaluation, count in evaluation_counts if evaluation == "Partial")
+        eval_count = yes_count + no_count + partial_count
+        evaluation_info = (f"     Yes: {yes_count}    {round((yes_count / eval_count) * 100, 2)}%\n"
+                           f"      No: {no_count}    {round((no_count / eval_count) * 100, 2)}%\n"
+                           f"Partial: {partial_count}    {round((partial_count / eval_count) * 100, 2)}%")
+        evaluation_info_label = ttk.Label(frame, text=evaluation_info)
+        evaluation_info_label.grid(row=4, column=0, columnspan=2, pady=5, padx=10, sticky="w")
+
+        # Получение комментария из базы данных
+        self.cursor.execute("SELECT comment FROM checklists WHERE id=?", (checklist[0],))
+        comment_data = self.cursor.fetchone()
+
+        # Отображение комментария
+        comment_value = comment_data[0] if comment_data is not None else ""
+        self.comment_text_value = comment_value  # Сохраняем комментарий для последующего отображения
+        comment_label = ttk.Label(frame, text=f"Комментарий: {comment_value}")
+        comment_label.grid(row=5, column=0, columnspan=2, pady=5, padx=10, sticky="w")
+
+        # Создаем кнопку "Выбрать в качестве шаблона"
+        select_template_button = ttk.Button(frame, text="Выбрать в качестве шаблона", command=open_create_window)
+        select_template_button.grid(row=0, column=2, padx=10, pady=5, sticky="e")
+
+        # Создаем поле ввода для фильтрации критериев
+        filter_entry = ttk.Entry(frame)
+        filter_entry.grid(row=1, column=2, columnspan=2, padx=10, pady=5, sticky="we")
+
+        # Создаем кнопку для запуска фильтрации
+        filter_button = ttk.Button(frame, text="Поиск", command=filter_criteria)
+        filter_button.grid(row=2, column=2, padx=10, pady=5, sticky="e")
+
+        # Получение критериев чек-листа из базы данных
+        self.cursor.execute("SELECT * FROM criteria WHERE checklist_id=?", (checklist[0],))
+        criteria_data = self.cursor.fetchall()
+
+        # Отображение критериев и их оценок
+        for i, criterion in enumerate(criteria_data):
+            criterion_label = ttk.Label(frame, text=f"Критерий {i + 1}: {criterion[2]}")
+            criterion_label.grid(row=0 + i, column=10, padx=10, pady=5, sticky='w')
+
+            evaluation_label = ttk.Label(frame, text=f"Оценка: {criterion[3]}")
+            evaluation_label.grid(row=0 + i, column=11, padx=10, pady=5, sticky='w')
+
+            source_text = criterion[4] if criterion[4] is not None else ""
+            source_label = ttk.Label(frame, text=f"Источник: {source_text}")
+            source_label.grid(row=0 + i, column=12, padx=10, pady=5, sticky='w')
+
+            # Создаем виджет Label для отображения комментария к каждому критерию
+            comment_label = ttk.Label(frame, text=f"Комментарий: {criterion[5]}")
+            comment_label.grid(row=0 + i, column=13, padx=10, pady=5, sticky='w')
+
+        # Привязка событий прокрутки к Canvas
+        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+    def filter_checklists(self):
+        # Получаем строку для поиска
+        search_text = self.search_entry.get().strip().lower()
+
+        # Получение всех чек-листов из базы данных, соответствующих поисковому запросу
+        self.cursor.execute(
+            "SELECT * FROM checklists WHERE LOWER(name) LIKE ? OR LOWER(product) LIKE ? OR LOWER(date) LIKE ?",
+            ('%' + search_text + '%', '%' + search_text + '%', '%' + search_text + '%'))
+        filtered_checklists = self.cursor.fetchall()
+
+        # Создание нового окна для отображения отфильтрованных чек-листов
+        filtered_window = tk.Toplevel(self.root)
+        filtered_window.title("Отфильтрованные чек-листы")
+
+        # Создание элементов списка отфильтрованных чек-листов
+        for i, checklist in enumerate(filtered_checklists):
+            # Формирование строки для отображения в списке
+            checklist_info = f"{checklist[1]} - {checklist[2]} - {checklist[3]} - {checklist[4]}"
+            checklist_label = ttk.Label(filtered_window, text=checklist_info)
+            checklist_label.grid(row=i, column=0, columnspan=3, pady=5, padx=10, sticky="w")
+
+            # Кнопка для просмотра выбранного чек-листа
+            view_button = ttk.Button(filtered_window, text="Просмотреть",
+                                     command=lambda c=checklist: self.view_checklist_window(c))
+            view_button.grid(row=i, column=3, pady=5, padx=10, sticky="w")
+
+            # Кнопка для удаления выбранного чек-листа
+            delete_button = ttk.Button(filtered_window, text="Удалить",
+                                       command=lambda c=checklist: self.delete_checklist(c[0]))
+            delete_button.grid(row=i, column=4, pady=5, padx=10, sticky="w")
+
+    def on_mousewheel(self, event):
+        # Определение направления прокрутки
+        if event.num == 4 or event.delta == 120 or event.delta > 0:
+            direction = 1
+        elif event.num == 5 or event.delta == -120 or event.delta < 0:
+            direction = -1
+        else:
+            direction = 0
+
+        # Прокрутка соответствующих виджетов
+        if event.widget.winfo_class() == "Canvas" or event.widget.winfo_class() == "Entry" or event.widget.winfo_class() == "Listbox":
+            event.widget.yview_scroll(-1 * direction, "units")
+        elif event.widget.winfo_class() == "Toplevel":
+            for child in event.widget.winfo_children():
+                if child.winfo_class() == "Canvas" or child.winfo_class() == "Entry" or child.winfo_class() == "Listbox":
+                    child.yview_scroll(-1 * direction, "units")
+                    break
+
+# Запуск приложения
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = UsabilityAuditApp(root)
+    root.mainloop()
